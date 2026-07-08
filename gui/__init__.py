@@ -1,0 +1,1 @@
+"""eBookSanitizer - GUI package."""
