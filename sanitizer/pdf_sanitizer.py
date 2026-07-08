@@ -169,16 +169,14 @@ class PDFSanitizer(BaseSanitizer):
             reader = PdfReader(self.file_path)
             writer = PdfWriter()
 
-            # ── Copy and clean pages ──
+            # ── In-place clean pages and add to writer ──
             for i, page in enumerate(reader.pages):
-                page_dict = page.get_object()
-
                 if mode == SanitizeMode.PARANOID:
-                    clean_page = self._paranoid_rebuild_page(i, page_dict)
+                    self._paranoid_rebuild_page_inplace(i, page)
                 else:
-                    clean_page = self._clean_page(i, page_dict, mode)
+                    self._clean_page_inplace(i, page, mode)
 
-                writer.add_page(clean_page)
+                writer.add_page(page)
 
             # ── Clean document root ──
             self._clean_root(reader, writer, mode)
@@ -197,119 +195,90 @@ class PDFSanitizer(BaseSanitizer):
 
         return self.report
 
-    # ── Page-level cleaning ───────────────────────────────────────────
+    # ── Page-level cleaning (in-place) ────────────────────────────────
 
-    def _clean_page(self, page_idx: int, page_dict: DictionaryObject,
-                    mode: SanitizeMode) -> DictionaryObject:
-        """Clean a page dict by removing dangerous keys (STANDARD / STRICT)."""
-        clean = DictionaryObject()
-
-        for k, v in page_dict.items():
+    def _clean_page_inplace(self, page_idx: int, page: DictionaryObject,
+                            mode: SanitizeMode):
+        """Clean a page dict in-place by removing dangerous keys."""
+        for k in list(page.keys()):
             norm = self._normalize_name(k)
 
             # All modes: strip /AA (Additional Actions)
             if norm == "/AA":
+                del page[k]
                 self.report.log(f"Page {page_idx + 1}: Stripped /AA")
                 continue
 
             # Handle annotations
             if norm == "/Annots":
-                clean_annots = self._clean_annotations(page_idx, v, mode)
-                clean[NameObject(k)] = clean_annots
-                continue
+                annots_val = page[k]
+                annots = annots_val.get_object() if hasattr(annots_val, 'get_object') else annots_val
+                if isinstance(annots, ArrayObject):
+                    self._clean_annotations_inplace(page_idx, annots, mode)
 
-            clean[NameObject(k)] = v
-
-        return clean
-
-    def _clean_annotations(self, page_idx: int, annots_val,
-                           mode: SanitizeMode) -> ArrayObject:
-        """Clean page annotations, removing dangerous actions."""
-        result = ArrayObject()
-        annots = annots_val.get_object() if hasattr(annots_val, 'get_object') else annots_val
-        if not isinstance(annots, ArrayObject):
-            return result
-
-        for ref in annots:
+    def _clean_annotations_inplace(self, page_idx: int, annots: ArrayObject,
+                                   mode: SanitizeMode):
+        """Clean page annotations in-place."""
+        for i, ref in enumerate(list(annots)):
             annot = ref.get_object() if hasattr(ref, 'get_object') else ref
-            if not isinstance(annot, DictionaryObject):
-                result.append(ref)
-                continue
+            if isinstance(annot, DictionaryObject):
+                self._clean_dict_obj_inplace(
+                    f"Page {page_idx + 1} Annot {i + 1}", annot, mode
+                )
 
-            clean_annot = self._clean_dict_obj(
-                f"Page {page_idx + 1} Annot", annot, mode
-            )
-            if clean_annot is not None:
-                result.append(clean_annot)
-
-        return result
-
-    def _clean_dict_obj(self, location: str, obj: DictionaryObject,
-                        mode: SanitizeMode) -> Optional[DictionaryObject]:
-        """Recursively clean a dictionary object."""
-        clean = DictionaryObject()
-
-        for k, v in obj.items():
+    def _clean_dict_obj_inplace(self, location: str, obj: DictionaryObject,
+                                mode: SanitizeMode):
+        """Recursively clean a dictionary object in-place."""
+        for k in list(obj.keys()):
             norm = self._normalize_name(k)
 
             # STANDARD: remove JS, AA, OpenAction, Launch
             if norm in self.HIGH_KEYS:
+                del obj[k]
                 self.report.log(f"{location}: Stripped {norm}")
                 continue
 
             # STRICT / PARANOID: also remove medium-severity keys
             if mode in (SanitizeMode.STRICT, SanitizeMode.PARANOID):
                 if norm in self.MEDIUM_KEYS:
+                    del obj[k]
                     self.report.log(f"{location}: Stripped {norm}")
                     continue
 
             # Handle /A (Action) sub-dictionaries
             if norm == "/A":
-                action = v.get_object() if hasattr(v, 'get_object') else v
+                action = obj[k].get_object() if hasattr(obj[k], 'get_object') else obj[k]
                 if isinstance(action, DictionaryObject):
                     s_type = self._normalize_name(str(action.get("/S", "")))
 
                     # Always remove JS / Launch actions
-                    if s_type in ("/JavaScript", "/Launch"):
+                    if s_type in ("/JavaScript", "/JS", "/Launch"):
+                        del obj[k]
                         self.report.log(f"{location}: Stripped action /S={s_type}")
                         continue
 
                     # STRICT+: also remove URI and SubmitForm actions
                     if mode in (SanitizeMode.STRICT, SanitizeMode.PARANOID):
                         if s_type in ("/URI", "/SubmitForm", "/ImportData"):
+                            del obj[k]
                             self.report.log(f"{location}: Stripped action /S={s_type}")
                             continue
 
             # Recurse into sub-dicts
+            v = obj[k]
             resolved = v.get_object() if hasattr(v, 'get_object') else v
             if isinstance(resolved, DictionaryObject):
-                cleaned_sub = self._clean_dict_obj(location, resolved, mode)
-                if cleaned_sub is not None:
-                    clean[NameObject(k)] = cleaned_sub
-            else:
-                clean[NameObject(k)] = v
+                self._clean_dict_obj_inplace(location, resolved, mode)
 
-        return clean
+    # ── PARANOID: full page rebuild (in-place) ────────────────────────
 
-    # ── PARANOID: full page rebuild ───────────────────────────────────
-
-    def _paranoid_rebuild_page(self, page_idx: int,
-                               page_dict: DictionaryObject) -> DictionaryObject:
-        """Rebuild a page keeping ONLY safe rendering keys.
-        
-        This is inspired by Dangerzone's zero-trust philosophy:
-        instead of trying to identify and remove every possible threat,
-        we only keep what we KNOW is safe.
-        """
-        clean = DictionaryObject()
-        for k, v in page_dict.items():
+    def _paranoid_rebuild_page_inplace(self, page_idx: int, page: DictionaryObject):
+        """Rebuild page dict in-place keeping ONLY safe rendering keys."""
+        for k in list(page.keys()):
             norm = self._normalize_name(k)
-            if norm in self.PARANOID_SAFE_PAGE_KEYS:
-                clean[NameObject(k)] = v
-            else:
+            if norm not in self.PARANOID_SAFE_PAGE_KEYS:
+                del page[k]
                 self.report.log(f"Page {page_idx + 1} (paranoid): Dropped {norm}")
-
-        return clean
 
     # ── Root (Catalog) cleaning ───────────────────────────────────────
 
@@ -355,7 +324,7 @@ class PDFSanitizer(BaseSanitizer):
 
     def _clean_names_tree(self, names: DictionaryObject,
                           mode: SanitizeMode) -> DictionaryObject:
-        """Clean the /Names dictionary (JS name tree, embedded files, etc.)."""
+        """Clean the /Names dictionary (JS name tree, embedded files, etc.) in-place."""
         clean = DictionaryObject()
         for k, v in names.items():
             norm = self._normalize_name(k)
@@ -373,3 +342,4 @@ class PDFSanitizer(BaseSanitizer):
 
             clean[NameObject(k)] = v
         return clean
+
