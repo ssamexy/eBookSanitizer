@@ -1,119 +1,147 @@
 # 🛡️ eBookSanitizer
 
-**Scan & sanitize eBooks for malicious content.**
+**Scan & sanitize eBooks for malicious and dynamic content.**
 
-掃描並消毒電子書中的惡意內容。
+[繁體中文版](README_zh.md)
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/Python-3.10+-green.svg)](https://python.org)
 
----
-
-## ✨ Features | 功能特色
-
-| Feature | 說明 |
-|---------|------|
-| 🔍 **Three-Layer Detection** | Structure audit + DOM analysis + PDF keyword engine |
-| 🛡️ **Three Sanitization Modes** | Standard / Strict / Paranoid |
-| 📄 **Format Preservation** | EPUB→EPUB, PDF→PDF (no lossy pixel conversion) |
-| 🌐 **Bilingual GUI** | English / 繁體中文 interface |
-| 🌗 **Dark & Light Themes** | Modern CustomTkinter UI |
-| 🔌 **Optional YARA Support** | Extend with custom malware signature rules |
-| 📦 **Zero Docker Dependency** | Pure Python — no containers required |
+eBookSanitizer is a security utility that scans and sanitizes EPUB and PDF files to remove malicious code, embedded executables, dynamic scripts, and tracking resources. It features both a CLI and a GUI, and **preserves the original layout and searchable text of your eBooks**, avoiding lossy pixelization methods.
 
 ---
 
-## 🏗️ Detection Architecture | 偵測架構
+## ✨ Features
+
+| Feature | Description |
+|---------|-------------|
+| 🔍 **Three-Layer Detection** | Combined structure audit, XHTML DOM analysis, and PDF keyword scanning. |
+| 🛡️ **Three Sanitization Modes** | Standard, Strict, and Paranoid modes to match your security needs. |
+| 📁 **Native Drag & Drop** | Easily drag one or multiple files into the window to load them. |
+| 📚 **Batch Processing Queue** | Import multiple files at once. The app will queue scan/sanitize tasks and output a summary. |
+| 📄 **Format & Text Preservation** | EPUB→EPUB, PDF→PDF. Never rasterizes; layout and searchable text remain 100% intact. |
+| 💻 **Dual CLI / GUI Modes** | Automatically runs GUI when launched without arguments; switches to CLI when commands are passed. |
+| 🌐 **Bilingual Interface** | Switch between English and Traditional Chinese seamlessly. |
+| 🔌 **Optional YARA Support** | Load custom YARA rules to detect known malware byte signatures in document streams. |
+
+---
+
+## 🏗️ Detection Architecture
 
 ```
 ┌─────────────────────────────────────────────────────────┐
 │  Layer 1: Structure Audit (EPUB)                        │
-│  ├─ ZIP file list traversal (dangerous extensions)      │
-│  ├─ ZipSlip directory traversal detection               │
+│  ├─ ZIP archive file list traversal (detects .exe, .bat)│
+│  ├─ ZipSlip directory traversal defense (../ checking)  │
 │  └─ Non-standard file extension warnings                │
 ├─────────────────────────────────────────────────────────┤
 │  Layer 2: Semantic DOM Analysis (EPUB)                  │
-│  ├─ <script>, <iframe>, <embed>, <object> detection     │
-│  ├─ on* event handler scanning                          │
-│  ├─ javascript: / data: URI protocol detection          │
-│  └─ External URL / tracking pixel scanning              │
+│  ├─ Detects <script>, <iframe>, <embed>, <object> tags  │
+│  ├─ Scans for inline event handlers (onload, onerror)   │
+│  ├─ Identifies javascript: and data: URI pseudo-protocols│
+│  └─ Finds tracking pixels and external resource URLs    │
 ├─────────────────────────────────────────────────────────┤
 │  Layer 3: PDF Keyword Engine (PDF)                      │
-│  ├─ Hex de-obfuscation (#XX decoding, from PDFiD)       │
-│  ├─ /JavaScript /OpenAction /AA /Launch detection       │
-│  ├─ Action /S sub-type analysis                         │
-│  └─ /EmbeddedFiles /XFA /SubmitForm scanning            │
+│  ├─ Hex de-obfuscation (decodes /J#61vaScript -> /JS)   │
+│  ├─ Counts /JS, /JavaScript, /OpenAction, /AA, /Launch  │
+│  ├─ Action /S sub-type recursive analysis               │
+│  └─ Detects embedded files, XFA forms, and submissions  │
 └─────────────────────────────────────────────────────────┘
 ```
 
-## 🔒 Sanitization Modes | 消毒模式
+## 🔒 Sanitization Modes
 
-| Mode | Description | 說明 |
-|------|-------------|------|
-| 🟢 **Standard** | Remove scripts, auto-actions, event handlers | 移除腳本、自動動作、事件處理器 |
-| 🟡 **Strict** | + Neutralize external links, embedded files | + 中立化外部連結、嵌入檔案 |
-| 🔴 **Paranoid** | + Rebuild structure with only safe content | + 重建結構，僅保留安全渲染內容 |
+| Mode | Description | Action Details |
+|------|-------------|----------------|
+| 🟢 **Standard** | Removes active code, preserves links | Strips `<script>`, inline events, `/JS`, and `/Launch`. Keeps hyperlinks and non-active attachments. |
+| 🟡 **Strict** | Neutralizes external links & assets | Standard + replaces external links with `#`, strips `/EmbeddedFiles`, `/XFA`, and form submissions. |
+| 🔴 **Paranoid** | Full structural rebuild | Strict + (EPUB) deletes all non-whitelisted files; (PDF) strips all non-whitelisted catalog/page attributes. |
 
 ---
 
-## 📦 Installation | 安裝
+## 📦 Installation
 
-### Prerequisites | 前置需求
-
+### Prerequisites
 - Python 3.10 or higher
 - pip (Python package manager)
 
-### Steps | 步驟
-
+### Steps
 ```bash
-# Clone the repository | 複製儲存庫
-git clone https://github.com/YOUR_USERNAME/eBookSanitizer.git
+# Clone the repository
+git clone https://github.com/ssamexy/eBookSanitizer.git
 cd eBookSanitizer
 
-# Install dependencies | 安裝依賴
+# Install dependencies
 pip install -r requirements.txt
 
-# Launch the GUI | 啟動圖形介面
+# Launch the application
 python main.py
 ```
 
-### Optional: YARA Support | 選用：YARA 支援
-
+### Optional: YARA Support
+To enable YARA signature scanning:
 ```bash
-# Install yara-python for advanced malware signature detection
 pip install yara-python
 ```
-
-Place your `.yar` / `.yara` rule files in `sanitizer/yara_rules/` to enable signature-based scanning.
-
----
-
-## 🖥️ Usage | 使用方式
-
-1. **Launch** the application with `python main.py`
-2. **Select** an EPUB or PDF file (click the file area)
-3. **Choose** a sanitization mode (Standard / Strict / Paranoid)
-4. **Click** "🔍 Scan Only" to detect threats, or "🛡️ Scan & Sanitize" to clean the file
-5. **Review** the activity log for detailed results
-
-啟動應用程式後，選擇電子書檔案，選擇消毒模式，然後點擊「掃描」或「掃描並消毒」。
+Place your `.yar` / `.yara` rule files inside the `sanitizer/yara_rules/` folder. They will be compiled and loaded automatically on startup.
 
 ---
 
-## 🏛️ Project Structure | 專案結構
+## 🖥️ Usage
+
+### Running the App
+
+#### 1. Graphical User Interface (GUI)
+Simply run `python main.py` with no arguments.
+- **Drag & Drop**: Drag one or multiple files into the window to load them.
+- **Batch Processing**: Select multiple files in the file dialog. The log panel will show progress queue logs.
+- **Dark/Light Theme**: Click the theme toggle at the top right to switch themes.
+
+#### 2. Command Line Interface (CLI)
+Pass arguments to automatically run in CLI mode.
+
+##### 🔎 Scan Only (No modification)
+```bash
+# Scan a file and output a summary report
+python main.py scan book.epub
+
+# Scan with detailed step logs
+python main.py scan book.pdf --verbose
+
+# Output pure JSON data (verbose logs are redirected to stderr)
+python main.py scan book.epub --json
+```
+
+##### 🛡️ Sanitize (Generates a clean copy)
+The clean copy will be saved with a `_sanitized` suffix.
+```bash
+# Sanitize using standard mode
+python main.py sanitize book.epub
+
+# Sanitize in strict mode with a custom output path
+python main.py sanitize book.pdf -o clean.pdf --mode strict
+```
+
+---
+
+## 🏛️ Project Structure
 
 ```
 eBookSanitizer/
-├── main.py                    # Entry point | 程式入口
+├── main.py                    # Entry point (auto-dispatches GUI/CLI)
+├── cli.py                     # CLI implementation and arguments parser
 ├── sanitizer/
-│   ├── base.py                # Core classes (Threat, Report, Mode)
-│   ├── epub_sanitizer.py      # Layer 1 + 2: EPUB scanner & sanitizer
-│   ├── pdf_sanitizer.py       # Layer 3: PDF scanner & sanitizer
-│   └── yara_scanner.py        # Optional YARA integration
+│   ├── __init__.py
+│   ├── base.py                # Core base classes & report structure
+│   ├── epub_sanitizer.py      # Layer 1 & 2 EPUB engine
+│   ├── pdf_sanitizer.py       # Layer 3 PDF engine
+│   └── yara_scanner.py        # Optional YARA scanning integration
 ├── gui/
-│   ├── app.py                 # Main GUI application
-│   ├── i18n.py                # Bilingual translations
-│   └── theme.py               # Color palette & typography
+│   ├── __init__.py
+│   ├── app.py                 # CustomTkinter interface & drag/drop hook
+│   ├── i18n.py                # Bilingual translation dictionary
+│   └── theme.py               # Theme colors and fonts configuration
+├── test_sanitizer.py          # Complete test suite containing 65 tests
 ├── requirements.txt
 ├── LICENSE                    # MIT License
 └── README.md
@@ -121,33 +149,17 @@ eBookSanitizer/
 
 ---
 
-## 🤝 Contributing | 貢獻
+## 📝 License
 
-Contributions are welcome! Please feel free to submit a Pull Request.
-
-歡迎貢獻！請隨時提交 Pull Request。
-
-1. Fork this repository
-2. Create your feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
+This project is licensed under the [MIT License](LICENSE).
 
 ---
 
-## 📝 License | 授權
+## 🙏 Credits
 
-This project is licensed under the MIT License — see the [LICENSE](LICENSE) file for details.
+The logic and analysis techniques in this project are inspired by:
 
-本專案採用 MIT 授權條款 — 詳見 [LICENSE](LICENSE) 檔案。
-
----
-
-## 🙏 Acknowledgments | 致謝
-
-This project's detection techniques are informed by:
-
-- **[PDFiD](https://github.com/DidierStevens/DidierStevensSuite)** — Hex de-obfuscation and PDF keyword scanning methodology
-- **[Dangerzone](https://github.com/freedomofpress/dangerzone)** — Zero-trust "paranoid mode" philosophy
-- **[OWASP XSS Prevention](https://owasp.org)** — EPUB DOM sanitization rules
-- **[QuickSand](https://github.com/tylabs/quicksand)** — YARA-based malware signature scanning concept
+- **[PDFiD](https://github.com/DidierStevens/DidierStevensSuite)** — PDF name object hex decoding & scanning methodologies
+- **[Dangerzone](https://github.com/freedomofpress/dangerzone)** — Zero-trust "paranoid mode" structural rebuild concept
+- **[OWASP XSS Prevention](https://owasp.org)** — XHTML DOM XSS attributes filtering list
+- **[QuickSand](https://github.com/tylabs/quicksand)** — Document decoding & YARA signature scan concepts
