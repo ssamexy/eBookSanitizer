@@ -146,7 +146,8 @@ eBookSanitizer/
 ├── test_sanitizer.py          # 包含 65 個測試的完整測試套件
 ├── requirements.txt
 ├── LICENSE                    # MIT
-└── README.md
+├── README.md                  # 英文版說明文件
+└── README.zh-TW.md            # 繁體中文版說明文件
 ```
 
 ---

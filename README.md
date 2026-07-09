@@ -2,7 +2,7 @@
 
 **Scan & sanitize eBooks for malicious and dynamic content.**
 
-[繁體中文版](README_zh.md)
+[繁體中文版](README.zh-TW.md)
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/Python-3.10+-green.svg)](https://python.org)
@@ -144,7 +144,8 @@ eBookSanitizer/
 ├── test_sanitizer.py          # Complete test suite containing 65 tests
 ├── requirements.txt
 ├── LICENSE                    # MIT License
-└── README.md
+├── README.md                  # English documentation
+└── README.zh-TW.md            # Traditional Chinese documentation
 ```
 
 ---
