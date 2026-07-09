@@ -29,7 +29,7 @@ import customtkinter as ctk
 
 from .theme import Colors, Fonts, Layout
 from .i18n import I18n
-from sanitizer import EPUBSanitizer, PDFSanitizer, SanitizeMode, YaraScanner
+from sanitizer import EPUBSanitizer, PDFSanitizer, SanitizeMode, YaraScanner, __version__
 
 
 class App(ctk.CTk):
@@ -45,7 +45,7 @@ class App(ctk.CTk):
         self.yara_scanner = YaraScanner()
 
         # ── Window Setup ──
-        self.title("eBookSanitizer")
+        self.title(f"eBookSanitizer v{__version__}")
         self.geometry(f"{Layout.WINDOW_WIDTH}x{Layout.WINDOW_HEIGHT}")
         self.minsize(750, 600)
         ctk.set_appearance_mode("dark")
