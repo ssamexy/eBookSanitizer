@@ -10,6 +10,16 @@ Features:
 - Chinese / English language toggle
 """
 
+import sys
+import os
+
+# If this file is run directly instead of main.py, redirect to main.py
+if __name__ == "__main__" and __package__ is None:
+    parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    sys.path.insert(0, parent_dir)
+    import subprocess
+    sys.exit(subprocess.call([sys.executable, os.path.join(parent_dir, "main.py")] + sys.argv[1:]))
+
 import os
 import threading
 import subprocess
