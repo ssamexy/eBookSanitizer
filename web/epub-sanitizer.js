@@ -19,11 +19,15 @@ class EPUBSanitizer {
     '' // files without extension (e.g., mimetype, container)
   ]);
 
-  static DANGEROUS_TAGS = ['script', 'iframe', 'embed', 'object', 'applet', 'form'];
+  static DANGEROUS_TAGS = ['script', 'iframe', 'embed', 'object', 'applet', 'form', 'foreignObject', 'foreignobject'];
 
   static ON_EVENT_RE = /^on\w+$/i;
 
   static DANGEROUS_PROTOCOLS = /^\s*(javascript|vbscript|data\s*:.*text\/html|data\s*:.*application)/i;
+
+  static CSS_EXTERNAL_RE = /(@import\s+(?:url\()?["']?\s*(?:https?:)?\/\/|url\(\s*["']?\s*(?:https?:)?\/\/)/i;
+
+  static CSS_ACTIVE_RE = /(expression\s*\(|-moz-binding\s*:|behavior\s*:)/i;
 
   constructor(file, logCallback = null) {
     this.file = file; // File object from input
@@ -96,6 +100,13 @@ class EPUBSanitizer {
           try {
             const content = await zipEntry.async('string');
             this._scanDom(filename, content);
+          } catch (e) {
+            this.log(`Warning: Could not read ${filename}: ${e.message}`);
+          }
+        } else if (ext === 'css') {
+          try {
+            const content = await zipEntry.async('string');
+            this._scanCss(filename, content);
           } catch (e) {
             this.log(`Warning: Could not read ${filename}: ${e.message}`);
           }
@@ -199,6 +210,10 @@ class EPUBSanitizer {
           );
         }
 
+        if (attr.name.toLowerCase() === 'style') {
+          this._scanCss(filename, attr.value, true);
+        }
+
         // C. Dangerous protocols in attributes
         if (['href', 'src', 'action', 'xlink:href', 'formaction'].includes(attr.name)) {
           if (EPUBSanitizer.DANGEROUS_PROTOCOLS.test(attr.value)) {
@@ -229,6 +244,37 @@ class EPUBSanitizer {
         'Medium'
       );
     }
+
+    const metas = Array.from(doc.getElementsByTagName('meta'));
+    for (const meta of metas) {
+      if (meta.hasAttribute('http-equiv') && /refresh/i.test(meta.getAttribute('http-equiv'))) {
+        const content = meta.getAttribute('content') || '';
+        const refreshUrl = this._extractRefreshUrl(content);
+        const severity = this._isExternalUrl(refreshUrl) ? 'High' : 'Medium';
+        this.addThreat('AutoRedirect', filename, `Meta refresh redirect: "${content.substring(0, 100)}"`, severity);
+      }
+    }
+
+    const styles = Array.from(doc.getElementsByTagName('style'));
+    for (const style of styles) {
+      this._scanCss(filename, style.textContent || '', true);
+    }
+  }
+
+  _scanCss(filename, content, inline = false) {
+    if (!content) return;
+    const location = inline ? `${filename} inline style` : filename;
+    if (EPUBSanitizer.CSS_ACTIVE_RE.test(content)) {
+      this.addThreat('ActiveCSS', location, 'CSS contains legacy active content syntax (expression, behavior, or -moz-binding)', 'High');
+    }
+    if (EPUBSanitizer.CSS_EXTERNAL_RE.test(content)) {
+      this.addThreat('ExternalResource', location, 'CSS imports or references an external URL', 'Medium');
+    }
+  }
+
+  _extractRefreshUrl(content) {
+    const match = /url\s*=\s*([^;]+)/i.exec(content || '');
+    return match ? match[1].trim().replace(/^['"]|['"]$/g, '') : '';
   }
 
   /**
@@ -287,6 +333,10 @@ class EPUBSanitizer {
         if (['xhtml', 'html', 'htm', 'xml', 'svg'].includes(ext)) {
           const stringContent = new TextDecoder('utf-8').decode(fileData);
           const sanitizedString = this._sanitizeHtml(filename, stringContent, mode);
+          fileData = new TextEncoder().encode(sanitizedString);
+        } else if (ext === 'css') {
+          const stringContent = new TextDecoder('utf-8').decode(fileData);
+          const sanitizedString = this._sanitizeCssText(stringContent, mode);
           fileData = new TextEncoder().encode(sanitizedString);
         }
 
@@ -407,6 +457,15 @@ class EPUBSanitizer {
       }
 
       // ── STRICT & PARANOID Modes: Neutralize external URLs ──
+      if (el.hasAttribute('style')) {
+        const original = el.getAttribute('style') || '';
+        const cleaned = this._sanitizeCssText(original, mode);
+        if (cleaned !== original) {
+          el.setAttribute('style', cleaned);
+          modified = true;
+        }
+      }
+
       if (mode === 'strict' || mode === 'paranoid') {
         // Neutralize external links in <a> tags
         if (el.tagName.toLowerCase() === 'a' && el.hasAttribute('href')) {
@@ -441,29 +500,35 @@ class EPUBSanitizer {
             this.log(`[${filename}] Blocked external CSS stylesheet: ${href.substring(0, 60)}`);
           }
         }
+
+        if (el.tagName.toLowerCase() === 'base' && el.hasAttribute('href')) {
+          const href = el.getAttribute('href');
+          if (this._isExternalUrl(href)) {
+            el.parentNode.removeChild(el);
+            modified = true;
+            this.log(`[${filename}] Removed external <base> href: ${href.substring(0, 60)}`);
+          }
+        }
       }
     }
 
-    // ── PARANOID Mode: strip <style> with @import and <meta http-equiv="refresh"> ──
-    if (mode === 'paranoid') {
-      // Remove meta refresh redirects
-      const metas = Array.from(doc.getElementsByTagName('meta'));
-      for (const meta of metas) {
-        if (meta.hasAttribute('http-equiv') && /refresh/i.test(meta.getAttribute('http-equiv'))) {
-          meta.parentNode.removeChild(meta);
-          modified = true;
-          this.log(`[${filename}] Removed meta refresh redirect`);
-        }
+    const metas = Array.from(doc.getElementsByTagName('meta'));
+    for (const meta of metas) {
+      if (meta.hasAttribute('http-equiv') && /refresh/i.test(meta.getAttribute('http-equiv'))) {
+        meta.parentNode.removeChild(meta);
+        modified = true;
+        this.log(`[${filename}] Removed meta refresh redirect`);
       }
+    }
 
-      // Remove @import in <style>
-      const styles = Array.from(doc.getElementsByTagName('style'));
-      for (const style of styles) {
-        if (style.textContent && /@import\s+url\s*\(/i.test(style.textContent)) {
-          style.textContent = style.textContent.replace(/@import\s+url\s*\([^)]*\)\s*;?/gi, '/* import removed */');
-          modified = true;
-          this.log(`[${filename}] Stripped external CSS @import rule`);
-        }
+    const styles = Array.from(doc.getElementsByTagName('style'));
+    for (const style of styles) {
+      const original = style.textContent || '';
+      const cleaned = this._sanitizeCssText(original, mode);
+      if (cleaned !== original) {
+        style.textContent = cleaned;
+        modified = true;
+        this.log(`[${filename}] Sanitized CSS in <style>`);
       }
     }
 
@@ -483,6 +548,15 @@ class EPUBSanitizer {
       }
     }
     return serialized;
+  }
+
+  _sanitizeCssText(text, mode) {
+    let cleaned = text.replace(/(expression\s*\(|-moz-binding\s*:|behavior\s*:)/gi, '/* active css removed */');
+    if (mode === 'strict' || mode === 'paranoid') {
+      cleaned = cleaned.replace(/@import\s+(?:url\()?["']?\s*(?:https?:)?\/\/[^;)]*\)?\s*;?/gi, '/* external import removed */');
+      cleaned = cleaned.replace(/url\(\s*["']?\s*(?:https?:)?\/\/[^)]*\)/gi, 'url("")');
+    }
+    return cleaned;
   }
 }
 

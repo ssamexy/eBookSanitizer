@@ -5,9 +5,11 @@
 
 class PDFSanitizer {
   static HIGH_KEYS = new Set(["/JS", "/JavaScript", "/OpenAction", "/AA", "/Launch"]);
-  static MEDIUM_KEYS = new Set(["/EmbeddedFiles", "/XFA", "/SubmitForm", "/ImportData"]);
+  static MEDIUM_KEYS = new Set(["/EmbeddedFiles", "/EmbeddedFile", "/XFA", "/SubmitForm", "/ImportData", "/RichMedia", "/Rendition"]);
   static ALL_DANGEROUS_KEYS = new Set([...PDFSanitizer.HIGH_KEYS, ...PDFSanitizer.MEDIUM_KEYS]);
-  static DANGEROUS_ACTION_TYPES = new Set(["/JavaScript", "/Launch", "/SubmitForm", "/ImportData"]);
+  static HIGH_ACTION_TYPES = new Set(["/JavaScript", "/JS", "/Launch"]);
+  static MEDIUM_ACTION_TYPES = new Set(["/URI", "/SubmitForm", "/ImportData", "/GoToR", "/GoToE", "/Rendition"]);
+  static DANGEROUS_ACTION_TYPES = new Set([...PDFSanitizer.HIGH_ACTION_TYPES, ...PDFSanitizer.MEDIUM_ACTION_TYPES]);
 
   static PARANOID_SAFE_PAGE_KEYS = new Set([
     "/Type", "/Parent", "/Contents", "/Resources", "/MediaBox",
@@ -173,11 +175,12 @@ class PDFSanitizer {
     if (sVal instanceof PDFLib.PDFName) {
       const sType = this._normalizeName(sVal.toString());
       if (PDFSanitizer.DANGEROUS_ACTION_TYPES.has(sType)) {
+        const severity = PDFSanitizer.HIGH_ACTION_TYPES.has(sType) ? "High" : "Medium";
         this.addThreat(
           "Action",
           location,
           `Action /S = ${sType}`,
-          "High"
+          severity
         );
       }
     }
@@ -323,16 +326,16 @@ class PDFSanitizer {
           if (sVal instanceof PDFLib.PDFName) {
             const sType = this._normalizeName(sVal.toString());
 
-            // Standard: remove JS / Launch actions
-            if (["/JavaScript", "/JS", "/Launch"].includes(sType)) {
+            // Standard: remove code execution / local launch actions
+            if (PDFSanitizer.HIGH_ACTION_TYPES.has(sType)) {
               obj.delete(key);
               this.log(`${location}: Stripped action /S=${sType}`);
               continue;
             }
 
-            // Strict / Paranoid: also remove URI and form submission actions
+            // Strict / Paranoid: also remove external navigation and form/data actions
             if (mode === 'strict' || mode === 'paranoid') {
-              if (["/URI", "/SubmitForm", "/ImportData"].includes(sType)) {
+              if (PDFSanitizer.MEDIUM_ACTION_TYPES.has(sType)) {
                 obj.delete(key);
                 this.log(`${location}: Stripped action /S=${sType}`);
                 continue;

@@ -156,6 +156,15 @@ function formatBytes(bytes, decimals = 2) {
   return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i];
 }
 
+function escapeHTML(value) {
+  return String(value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 function appendLog(message, type = 'info') {
   const line = document.createElement("div");
   line.className = `log-line ${type}-line`;
@@ -278,17 +287,15 @@ function updateQueueUI() {
     if (item.sha256) {
       sha256Meta = `
         <div class="queue-item-sha256" style="font-size: 11px; color: var(--text-secondary); margin-top: 4px; font-family: monospace; word-break: break-all;">
-          SHA-256: ${item.sha256} | 
-          <a href="https://www.virustotal.com/gui/file/${item.sha256}" target="_blank" style="color: var(--primary); text-decoration: underline;">
-            ${currentLang === 'zh-TW' ? 'VirusTotal 查詢' : 'VirusTotal Lookup'}
-          </a>
+          SHA-256: ${escapeHTML(item.sha256)}
         </div>
       `;
     }
 
+    const safeName = escapeHTML(item.name);
     el.innerHTML = `
       <div class="queue-item-info">
-        <div class="queue-item-name" title="${item.name}">${item.name}</div>
+        <div class="queue-item-name" title="${safeName}">${safeName}</div>
         <div class="queue-item-meta">
           <span>${formatBytes(item.size)}</span>
           <span>•</span>

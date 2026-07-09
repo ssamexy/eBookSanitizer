@@ -34,14 +34,22 @@ class PDFSanitizer(BaseSanitizer):
     })
     # Medium severity: data exfiltration / embedded payloads
     MEDIUM_KEYS = frozenset({
-        "/EmbeddedFiles", "/XFA", "/SubmitForm", "/ImportData",
+        "/EmbeddedFiles", "/EmbeddedFile", "/XFA", "/SubmitForm", "/ImportData",
+        "/RichMedia", "/Rendition",
     })
     ALL_DANGEROUS_KEYS = HIGH_KEYS | MEDIUM_KEYS
 
-    # Action sub-types that are dangerous
-    DANGEROUS_ACTION_TYPES = frozenset({
-        "/JavaScript", "/Launch", "/SubmitForm", "/ImportData",
+    # Action sub-types that execute code or launch local programs.
+    HIGH_ACTION_TYPES = frozenset({
+        "/JavaScript", "/JS", "/Launch",
     })
+
+    # Action sub-types that can open external content or exfiltrate form data.
+    MEDIUM_ACTION_TYPES = frozenset({
+        "/URI", "/SubmitForm", "/ImportData", "/GoToR", "/GoToE", "/Rendition",
+    })
+
+    DANGEROUS_ACTION_TYPES = HIGH_ACTION_TYPES | MEDIUM_ACTION_TYPES
 
     # Keys safe to keep in PARANOID mode page rebuild
     PARANOID_SAFE_PAGE_KEYS = frozenset({
@@ -100,6 +108,8 @@ class PDFSanitizer(BaseSanitizer):
                         if isinstance(annot, DictionaryObject):
                             self._scan_dict(f"Page {i + 1} Annot {j + 1}", annot, visited)
 
+            self.report.success = True
+
         except Exception as e:
             self.report.error(f"Failed to scan PDF: {e}")
 
@@ -144,10 +154,11 @@ class PDFSanitizer(BaseSanitizer):
             return
         s_type = self._normalize_name(str(action.get("/S", "")))
         if s_type in self.DANGEROUS_ACTION_TYPES:
+            severity = "High" if s_type in self.HIGH_ACTION_TYPES else "Medium"
             self.report.add_threat(Threat(
                 "Action", location,
                 f"Action /S = {s_type}",
-                "High"
+                severity
             ))
 
     def _scan_array(self, location: str, arr: ArrayObject, visited: Set[int]):
@@ -258,15 +269,15 @@ class PDFSanitizer(BaseSanitizer):
                 if isinstance(action, DictionaryObject):
                     s_type = self._normalize_name(str(action.get("/S", "")))
 
-                    # Always remove JS / Launch actions
-                    if s_type in ("/JavaScript", "/JS", "/Launch"):
+                    # Always remove code execution / local launch actions.
+                    if s_type in self.HIGH_ACTION_TYPES:
                         del obj[k]
                         self.report.log(f"{location}: Stripped action /S={s_type}")
                         continue
 
-                    # STRICT+: also remove URI and SubmitForm actions
+                    # STRICT+: also remove external navigation and form/data actions.
                     if mode in (SanitizeMode.STRICT, SanitizeMode.PARANOID):
-                        if s_type in ("/URI", "/SubmitForm", "/ImportData"):
+                        if s_type in self.MEDIUM_ACTION_TYPES:
                             del obj[k]
                             self.report.log(f"{location}: Stripped action /S={s_type}")
                             continue
