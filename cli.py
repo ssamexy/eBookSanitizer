@@ -88,6 +88,11 @@ def print_report(report: SanitizeReport, as_json: bool = False):
     total = len(report.threats)
 
     print()
+    if report.sha256:
+        print(f"  {C.CYAN}SHA-256:{C.RESET} {report.sha256}")
+        print(f"  {C.CYAN}VirusTotal:{C.RESET} https://www.virustotal.com/gui/file/{report.sha256}")
+        print()
+
     if report.has_threats:
         print(f"  {C.YELLOW}{C.BOLD}Threats detected: {total}{C.RESET}")
         print(f"    {C.RED}High: {summary['High']}{C.RESET}  "
@@ -174,14 +179,14 @@ def cmd_sanitize(args):
 
     if not args.json:
         print(f"{C.CYAN}{C.BOLD}Sanitizing:{C.RESET} {file_path}")
-        print(f"  Mode: {C.BOLD}{mode.value}{C.RESET}  Output: {output_path}")
+        print(f"  Mode: {C.BOLD}{mode.value}{C.RESET}  Output: {output_path}  Scrub Metadata: {C.BOLD}{args.scrub}{C.RESET}")
 
     sanitizer = create_sanitizer(file_path, verbose=args.verbose, as_json=args.json)
     if sanitizer is None:
         print(f"{C.RED}Error: Unsupported format. Use EPUB or PDF.{C.RESET}", file=sys.stderr)
         return 1
 
-    report = sanitizer.sanitize(output_path, mode)
+    report = sanitizer.sanitize(output_path, mode, scrub_metadata=args.scrub)
     print_report(report, as_json=args.json)
 
     return 0 if report.success else 1
@@ -229,6 +234,8 @@ def build_parser() -> argparse.ArgumentParser:
                                  help="Show detailed sanitization logs")
     sanitize_parser.add_argument("--json", action="store_true",
                                  help="Output results as JSON")
+    sanitize_parser.add_argument("--scrub", action="store_true",
+                                 help="Scrub and anonymize document metadata (author, dates, etc.)")
 
     # ── gui ──
     subparsers.add_parser("gui", help="Launch the graphical user interface")

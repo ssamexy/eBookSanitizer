@@ -34,14 +34,22 @@ class PDFSanitizer(BaseSanitizer):
     })
     # Medium severity: data exfiltration / embedded payloads
     MEDIUM_KEYS = frozenset({
-        "/EmbeddedFiles", "/XFA", "/SubmitForm", "/ImportData",
+        "/EmbeddedFiles", "/EmbeddedFile", "/XFA", "/SubmitForm", "/ImportData",
+        "/RichMedia", "/Rendition",
     })
     ALL_DANGEROUS_KEYS = HIGH_KEYS | MEDIUM_KEYS
 
-    # Action sub-types that are dangerous
-    DANGEROUS_ACTION_TYPES = frozenset({
-        "/JavaScript", "/Launch", "/SubmitForm", "/ImportData",
+    # Action sub-types that execute code or launch local programs.
+    HIGH_ACTION_TYPES = frozenset({
+        "/JavaScript", "/JS", "/Launch",
     })
+
+    # Action sub-types that can open external content or exfiltrate form data.
+    MEDIUM_ACTION_TYPES = frozenset({
+        "/URI", "/SubmitForm", "/ImportData", "/GoToR", "/GoToE", "/Rendition",
+    })
+
+    DANGEROUS_ACTION_TYPES = HIGH_ACTION_TYPES | MEDIUM_ACTION_TYPES
 
     # Keys safe to keep in PARANOID mode page rebuild
     PARANOID_SAFE_PAGE_KEYS = frozenset({
@@ -100,6 +108,8 @@ class PDFSanitizer(BaseSanitizer):
                         if isinstance(annot, DictionaryObject):
                             self._scan_dict(f"Page {i + 1} Annot {j + 1}", annot, visited)
 
+            self.report.success = True
+
         except Exception as e:
             self.report.error(f"Failed to scan PDF: {e}")
 
@@ -144,10 +154,11 @@ class PDFSanitizer(BaseSanitizer):
             return
         s_type = self._normalize_name(str(action.get("/S", "")))
         if s_type in self.DANGEROUS_ACTION_TYPES:
+            severity = "High" if s_type in self.HIGH_ACTION_TYPES else "Medium"
             self.report.add_threat(Threat(
                 "Action", location,
                 f"Action /S = {s_type}",
-                "High"
+                severity
             ))
 
     def _scan_array(self, location: str, arr: ArrayObject, visited: Set[int]):
@@ -162,7 +173,7 @@ class PDFSanitizer(BaseSanitizer):
     #  SANITIZE (three-tier modes)
     # ══════════════════════════════════════════════════════════════════
 
-    def sanitize(self, output_path: str, mode: SanitizeMode = SanitizeMode.STANDARD) -> SanitizeReport:
+    def sanitize(self, output_path: str, mode: SanitizeMode = SanitizeMode.STANDARD, scrub_metadata: bool = False) -> SanitizeReport:
         self.report.log(f"Sanitizing PDF [{mode.value}]: {os.path.basename(self.file_path)}")
 
         try:
@@ -179,7 +190,14 @@ class PDFSanitizer(BaseSanitizer):
                 writer.add_page(page)
 
             # ── Clean document root ──
-            self._clean_root(reader, writer, mode)
+            self._clean_root(reader, writer, mode, scrub_metadata)
+
+            # ── Document Information (/Info) ──
+            if scrub_metadata:
+                writer._info.clear()
+                self.report.log("Trailer: Cleared Document Info dictionary (/Info) for metadata scrubbing.")
+            elif reader.metadata:
+                writer.add_metadata(reader.metadata)
 
             # ── Write output ──
             with open(output_path, "wb") as f:
@@ -251,15 +269,15 @@ class PDFSanitizer(BaseSanitizer):
                 if isinstance(action, DictionaryObject):
                     s_type = self._normalize_name(str(action.get("/S", "")))
 
-                    # Always remove JS / Launch actions
-                    if s_type in ("/JavaScript", "/JS", "/Launch"):
+                    # Always remove code execution / local launch actions.
+                    if s_type in self.HIGH_ACTION_TYPES:
                         del obj[k]
                         self.report.log(f"{location}: Stripped action /S={s_type}")
                         continue
 
-                    # STRICT+: also remove URI and SubmitForm actions
+                    # STRICT+: also remove external navigation and form/data actions.
                     if mode in (SanitizeMode.STRICT, SanitizeMode.PARANOID):
-                        if s_type in ("/URI", "/SubmitForm", "/ImportData"):
+                        if s_type in self.MEDIUM_ACTION_TYPES:
                             del obj[k]
                             self.report.log(f"{location}: Stripped action /S={s_type}")
                             continue
@@ -283,7 +301,7 @@ class PDFSanitizer(BaseSanitizer):
     # ── Root (Catalog) cleaning ───────────────────────────────────────
 
     def _clean_root(self, reader: PdfReader, writer: PdfWriter,
-                    mode: SanitizeMode):
+                    mode: SanitizeMode, scrub_metadata: bool = False):
         """Clean the document catalog / root object."""
         root = writer._root_object
         orig_root = reader.root_object
@@ -293,6 +311,11 @@ class PDFSanitizer(BaseSanitizer):
 
             # Skip keys already managed by PdfWriter
             if k in root:
+                continue
+
+            # Skip metadata stream if scrubbing
+            if norm == "/Metadata" and scrub_metadata:
+                self.report.log("Root: Stripped /Metadata stream (Metadata Scrubbing)")
                 continue
 
             # STANDARD: strip high-severity root keys

@@ -47,7 +47,7 @@ class EPUBSanitizer(BaseSanitizer):
     # ── Layer 2: Semantic DOM Analysis ────────────────────────────────
 
     # HTML tags that can execute code or load external content
-    DANGEROUS_TAGS = ['script', 'iframe', 'embed', 'object', 'applet', 'form']
+    DANGEROUS_TAGS = ['script', 'iframe', 'embed', 'object', 'applet', 'form', 'foreignobject']
 
     # Regex for on* event attributes (case-insensitive)
     ON_EVENT_RE = re.compile(r'^on\w+$', re.IGNORECASE)
@@ -55,6 +55,16 @@ class EPUBSanitizer(BaseSanitizer):
     # Protocols considered dangerous in href/src attributes
     DANGEROUS_PROTOCOLS = re.compile(
         r'^\s*(javascript|vbscript|data\s*:.*text/html|data\s*:.*application)',
+        re.IGNORECASE
+    )
+
+    CSS_EXTERNAL_RE = re.compile(
+        r'(@import\s+(?:url\()?["\']?\s*(?:https?:)?//|url\(\s*["\']?\s*(?:https?:)?//)',
+        re.IGNORECASE
+    )
+
+    CSS_ACTIVE_RE = re.compile(
+        r'(expression\s*\(|-moz-binding\s*:|behavior\s*:)',
         re.IGNORECASE
     )
 
@@ -88,6 +98,14 @@ class EPUBSanitizer(BaseSanitizer):
                             self._scan_dom(name, content)
                         except Exception as e:
                             self.report.log(f"Warning: Could not read {name}: {e}")
+                    elif ext == '.css':
+                        try:
+                            content = zf.read(name).decode('utf-8', errors='replace')
+                            self._scan_css(name, content)
+                        except Exception as e:
+                            self.report.log(f"Warning: Could not read {name}: {e}")
+
+            self.report.success = True
 
         except Exception as e:
             self.report.error(f"Failed to open EPUB archive: {e}")
@@ -153,6 +171,8 @@ class EPUBSanitizer(BaseSanitizer):
                         f"Inline event: {attr}=\"{str(tag[attr])[:80]}\"",
                         "High"
                     ))
+                if attr.lower() == 'style':
+                    self._scan_css(file_in_epub, str(tag[attr]), inline=True)
 
         # C. Dangerous protocols in href / src / action
         for tag in soup.find_all(True):
@@ -180,6 +200,36 @@ class EPUBSanitizer(BaseSanitizer):
                 "Medium"
             ))
 
+        for meta in soup.find_all("meta", attrs={"http-equiv": re.compile(r"refresh", re.I)}):
+            content = str(meta.get("content", ""))
+            severity = "High" if self._is_external_url(self._extract_refresh_url(content)) else "Medium"
+            self.report.add_threat(Threat(
+                "AutoRedirect", file_in_epub,
+                f"Meta refresh redirect: \"{content[:100]}\"",
+                severity
+            ))
+
+        for style in soup.find_all("style"):
+            self._scan_css(file_in_epub, style.get_text() or "", inline=True)
+
+    def _scan_css(self, file_in_epub: str, content: str, inline: bool = False):
+        """Detect CSS-based active content and external tracking resources."""
+        if not content:
+            return
+        location = f"{file_in_epub} inline style" if inline else file_in_epub
+        if self.CSS_ACTIVE_RE.search(content):
+            self.report.add_threat(Threat(
+                "ActiveCSS", location,
+                "CSS contains legacy active content syntax (expression, behavior, or -moz-binding)",
+                "High"
+            ))
+        if self.CSS_EXTERNAL_RE.search(content):
+            self.report.add_threat(Threat(
+                "ExternalResource", location,
+                "CSS imports or references an external URL",
+                "Medium"
+            ))
+
     @staticmethod
     def _is_external_url(url: str) -> bool:
         if not url:
@@ -187,11 +237,16 @@ class EPUBSanitizer(BaseSanitizer):
         u = url.lower().strip()
         return u.startswith("http://") or u.startswith("https://") or u.startswith("//")
 
+    @staticmethod
+    def _extract_refresh_url(content: str) -> str:
+        match = re.search(r'url\s*=\s*([^;]+)', content, re.IGNORECASE)
+        return match.group(1).strip().strip('\"\'') if match else ""
+
     # ══════════════════════════════════════════════════════════════════
     #  SANITIZE (three-tier modes)
     # ══════════════════════════════════════════════════════════════════
 
-    def sanitize(self, output_path: str, mode: SanitizeMode = SanitizeMode.STANDARD) -> SanitizeReport:
+    def sanitize(self, output_path: str, mode: SanitizeMode = SanitizeMode.STANDARD, scrub_metadata: bool = False) -> SanitizeReport:
         self.report.log(f"Sanitizing EPUB [{mode.value}]: {os.path.basename(self.file_path)}")
 
         if not zipfile.is_zipfile(self.file_path):
@@ -230,6 +285,12 @@ class EPUBSanitizer(BaseSanitizer):
                     # Sanitize HTML-like content
                     if ext in {'.xhtml', '.html', '.htm', '.xml', '.svg'}:
                         file_data = self._sanitize_html(name, file_data, mode)
+                    elif ext == '.css':
+                        file_data = self._sanitize_css(name, file_data, mode)
+
+                    # Scrub metadata from OPF manifest file
+                    if ext == '.opf' and scrub_metadata:
+                        file_data = self._scrub_opf_metadata(file_data)
 
                     with open(target_path, 'wb') as f:
                         f.write(file_data)
@@ -248,6 +309,52 @@ class EPUBSanitizer(BaseSanitizer):
             shutil.rmtree(temp_dir, ignore_errors=True)
 
         return self.report
+
+    def _scrub_opf_metadata(self, file_data: bytes) -> bytes:
+        import xml.etree.ElementTree as ET
+        try:
+            # Register namespaces to keep output formatted correctly
+            namespaces = {
+                '': 'http://www.idpf.org/2007/opf',
+                'dc': 'http://purl.org/dc/elements/1.1/',
+                'opf': 'http://www.idpf.org/2007/opf',
+                'xsi': 'http://www.w3.org/2001/XMLSchema-instance',
+                'dcterms': 'http://purl.org/dc/terms/'
+            }
+            for prefix, uri in namespaces.items():
+                ET.register_namespace(prefix, uri)
+
+            root = ET.fromstring(file_data)
+            metadata = root.find('.//{http://www.idpf.org/2007/opf}metadata')
+            if metadata is None:
+                metadata = root.find('.//metadata')
+
+            if metadata is not None:
+                to_remove = []
+                for elem in metadata:
+                    tag_local = elem.tag.split('}')[-1]
+                    if tag_local in ('creator', 'contributor', 'date', 'publisher', 'rights', 'identifier'):
+                        to_remove.append(elem)
+                    elif tag_local == 'meta' and 'refines' not in elem.attrib:
+                        prop = elem.get('property', '')
+                        name_attr = elem.get('name', '')
+                        if 'modified' in prop or 'date' in prop or name_attr in ('calibre:title_sort', 'calibre:timestamp', 'calibre:series'):
+                            to_remove.append(elem)
+
+                for elem in to_remove:
+                    metadata.remove(elem)
+
+                # Re-insert safe dc:identifier (pub-id)
+                id_elem = ET.Element('{http://purl.org/dc/elements/1.1/}identifier', id='pub-id')
+                id_elem.text = 'urn:uuid:00000000-0000-0000-0000-000000000000'
+                metadata.append(id_elem)
+
+                self.report.log("EPUB: Anonymized metadata inside OPF manifest.")
+
+            return ET.tostring(root, encoding='utf-8')
+        except Exception as e:
+            self.report.log(f"Warning: Failed to scrub OPF metadata: {e}")
+            return file_data
 
     def _sanitize_html(self, file_in_epub: str, content: bytes, mode: SanitizeMode) -> bytes:
         """Clean HTML content according to the selected sanitization mode."""
@@ -278,6 +385,28 @@ class EPUBSanitizer(BaseSanitizer):
                     self.report.log(f"[{file_in_epub}] Neutralized {attr_name}=\"{val[:60]}\"")
 
         # ── STRICT + PARANOID: neutralize external URLs ──
+        # Remove auto-redirects in every mode; they execute on document open.
+        for meta in soup.find_all("meta", attrs={"http-equiv": re.compile(r"refresh", re.I)}):
+            meta.decompose()
+            modified = True
+            self.report.log(f"[{file_in_epub}] Removed meta refresh redirect")
+
+        for style in soup.find_all("style"):
+            original = style.get_text() or ""
+            cleaned = self._sanitize_css_text(original, mode)
+            if cleaned != original:
+                style.string = cleaned
+                modified = True
+                self.report.log(f"[{file_in_epub}] Sanitized CSS in <style>")
+
+        for tag in soup.find_all(True):
+            if tag.has_attr("style"):
+                original = str(tag["style"])
+                cleaned = self._sanitize_css_text(original, mode)
+                if cleaned != original:
+                    tag["style"] = cleaned
+                    modified = True
+
         if mode in (SanitizeMode.STRICT, SanitizeMode.PARANOID):
             for tag in soup.find_all("a", href=True):
                 if self._is_external_url(tag["href"]):
@@ -300,26 +429,41 @@ class EPUBSanitizer(BaseSanitizer):
                 if self._is_external_url(link["href"]):
                     link.decompose()
                     modified = True
+                    self.report.log(f"[{file_in_epub}] Blocked external CSS stylesheet")
 
-        # ── PARANOID: also strip <style> with @import and <meta http-equiv=refresh> ──
-        if mode == SanitizeMode.PARANOID:
-            # Remove meta refresh redirects
-            for meta in soup.find_all("meta", attrs={"http-equiv": re.compile(r"refresh", re.I)}):
-                meta.decompose()
-                modified = True
-                self.report.log(f"[{file_in_epub}] Removed meta refresh redirect")
-
-            # Remove @import in <style> that references external URLs
-            for style in soup.find_all("style"):
-                if style.string and re.search(r'@import\s+url\s*\(', style.string, re.I):
-                    style.string = re.sub(
-                        r'@import\s+url\s*\([^)]*\)\s*;?', '/* import removed */', style.string
-                    )
+            for base in soup.find_all("base", href=True):
+                if self._is_external_url(base["href"]):
+                    base.decompose()
                     modified = True
+                    self.report.log(f"[{file_in_epub}] Removed external <base> href")
 
         if not modified:
             return content
         return str(soup).encode('utf-8')
+
+    def _sanitize_css(self, file_in_epub: str, content: bytes, mode: SanitizeMode) -> bytes:
+        text = content.decode('utf-8', errors='replace')
+        cleaned = self._sanitize_css_text(text, mode)
+        if cleaned != text:
+            self.report.log(f"[{file_in_epub}] Sanitized CSS")
+        return cleaned.encode('utf-8')
+
+    def _sanitize_css_text(self, text: str, mode: SanitizeMode) -> str:
+        cleaned = self.CSS_ACTIVE_RE.sub('/* active css removed */', text)
+        if mode in (SanitizeMode.STRICT, SanitizeMode.PARANOID):
+            cleaned = re.sub(
+                r'@import\s+(?:url\()?["\']?\s*(?:https?:)?//[^;)]*\)?\s*;?',
+                '/* external import removed */',
+                cleaned,
+                flags=re.IGNORECASE
+            )
+            cleaned = re.sub(
+                r'url\(\s*["\']?\s*(?:https?:)?//[^)]*\)',
+                'url("")',
+                cleaned,
+                flags=re.IGNORECASE
+            )
+        return cleaned
 
     @staticmethod
     def _repackage_epub(temp_dir: str, output_path: str):

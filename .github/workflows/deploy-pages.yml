@@ -1,0 +1,26 @@
+name: Deploy Web Version to GitHub Pages
+
+on:
+  push:
+    branches:
+      - main
+      - web-version
+    paths:
+      - "web/**"
+
+permissions:
+  contents: write
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Deploy web folder to gh-pages
+        uses: JamesIves/github-pages-deploy-action@v4
+        with:
+          folder: web
+          branch: gh-pages
+          clean: true
