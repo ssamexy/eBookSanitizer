@@ -40,7 +40,7 @@ class App(ctk.CTk):
 
         # ── State ──
         self.i18n = I18n("en")
-        self.selected_file: str = ""
+        self.selected_files: list[str] = []
         self.mode = SanitizeMode.STANDARD
         self.yara_scanner = YaraScanner()
 
@@ -54,6 +54,7 @@ class App(ctk.CTk):
         # ── Build UI ──
         self._build_ui()
         self.i18n.on_change(self._refresh_texts)
+        self._setup_drag_and_drop()
 
     # ══════════════════════════════════════════════════════════════════
     #  UI CONSTRUCTION
@@ -270,8 +271,8 @@ class App(ctk.CTk):
     # ══════════════════════════════════════════════════════════════════
 
     def _select_file(self):
-        path = filedialog.askopenfilename(
-            title="Select eBook",
+        paths = filedialog.askopenfilenames(
+            title="Select eBooks",
             filetypes=[
                 ("eBook files", "*.epub *.pdf"),
                 ("EPUB", "*.epub"),
@@ -279,17 +280,68 @@ class App(ctk.CTk):
                 ("All files", "*.*"),
             ]
         )
-        if path:
-            self.selected_file = path
+        if paths:
+            self.selected_files = list(paths)
+            self._update_file_labels()
+
+    def _update_file_labels(self):
+        count = len(self.selected_files)
+        if count == 0:
+            self.file_label.configure(text="")
+            self.file_drop.configure(
+                text=f"📂  {self.i18n.t('file.drop_title')}\n\n{self.i18n.t('file.drop_subtitle')}",
+                border_color=Colors.DARK_BORDER,
+                text_color=Colors.DARK_TEXT_SECONDARY,
+            )
+        elif count == 1:
+            filename = os.path.basename(self.selected_files[0])
             self.file_label.configure(
-                text=f"📄 {self.i18n.t('file.selected')}: {os.path.basename(path)}"
+                text=f"📄 {self.i18n.t('file.selected')}: {filename}"
             )
             self.file_drop.configure(
-                text=f"📂 {os.path.basename(path)}",
+                text=f"📂 {filename}",
                 border_color=Colors.PRIMARY,
                 text_color=Colors.PRIMARY_LIGHT,
             )
-            self._log(f"File selected: {path}")
+            self._log(f"File selected: {self.selected_files[0]}")
+        else:
+            self.file_label.configure(
+                text=f"📚 {self.i18n.t('file.selected_count').format(count)}"
+            )
+            self.file_drop.configure(
+                text=self.i18n.t('file.batch_mode').format(count),
+                border_color=Colors.PRIMARY,
+                text_color=Colors.PRIMARY_LIGHT,
+            )
+            self._log(f"Batch files selected ({count} files):")
+            for f in self.selected_files:
+                self._log(f"  - {f}")
+
+    def _setup_drag_and_drop(self):
+        if platform.system() == "Windows":
+            try:
+                import windnd
+                windnd.hook_dropfiles(self, self._on_file_dropped)
+                self._log("Drag & Drop support enabled.")
+            except ImportError:
+                self._log("Install 'windnd' to enable drag & drop support.")
+
+    def _on_file_dropped(self, files):
+        valid_files = []
+        for f in files:
+            path = f.decode('utf-8') if isinstance(f, bytes) else f
+            ext = os.path.splitext(path.lower())[1]
+            if ext in ('.epub', '.pdf'):
+                valid_files.append(path)
+        
+        if valid_files:
+            self.selected_files = valid_files
+            self._update_file_labels()
+        else:
+            messagebox.showwarning(
+                self.i18n.t("dialog.error"),
+                self.i18n.t("dialog.unsupported")
+            )
 
     def _on_mode_change(self):
         val = self.mode_var.get()
@@ -309,52 +361,71 @@ class App(ctk.CTk):
         threading.Thread(target=self._run_sanitize, daemon=True).start()
 
     def _run_scan(self):
-        try:
-            sanitizer = self._create_sanitizer()
-            if sanitizer is None:
-                return
-            report = sanitizer.scan()
-            self.after(0, lambda: self._show_results(report, scan_only=True))
-        except Exception as e:
-            self.after(0, lambda: self._log(f"ERROR: {e}"))
-        finally:
-            self.after(0, lambda: self._set_buttons_state(True))
+        total = len(self.selected_files)
+        self.after(0, lambda: self._log("=" * 50))
+        self.after(0, lambda: self._log(f"Batch Scan Started: {total} files"))
+        self.after(0, lambda: self._log("=" * 50))
+        
+        for idx, file_path in enumerate(self.selected_files):
+            try:
+                self.after(0, lambda f=file_path, i=idx: self._log(f"\n[{i+1}/{total}] Scanning: {os.path.basename(f)}"))
+                sanitizer = self._create_sanitizer_for_file(file_path)
+                if sanitizer is None:
+                    continue
+                report = sanitizer.scan()
+                self.after(0, lambda r=report: self._show_results(r, scan_only=True))
+            except Exception as e:
+                self.after(0, lambda m=file_path, err=e: self._log(f"ERROR on {os.path.basename(m)}: {err}"))
+        
+        self.after(0, lambda: self._log("\n" + "=" * 50))
+        self.after(0, lambda: self._log("Batch Scan Completed."))
+        self.after(0, lambda: self._log("=" * 50))
+        self.after(0, lambda: self._set_buttons_state(True))
 
     def _run_sanitize(self):
-        try:
-            sanitizer = self._create_sanitizer()
-            if sanitizer is None:
-                return
+        total = len(self.selected_files)
+        self.after(0, lambda: self._log("=" * 50))
+        self.after(0, lambda: self._log(f"Batch Sanitization Started: {total} files [{self.mode.value}]"))
+        self.after(0, lambda: self._log("=" * 50))
 
-            # Generate output path
-            base, ext = os.path.splitext(self.selected_file)
-            output_path = f"{base}_sanitized{ext}"
+        success_count = 0
+        for idx, file_path in enumerate(self.selected_files):
+            try:
+                self.after(0, lambda f=file_path, i=idx: self._log(f"\n[{i+1}/{total}] Sanitizing: {os.path.basename(f)}"))
+                sanitizer = self._create_sanitizer_for_file(file_path)
+                if sanitizer is None:
+                    continue
 
-            report = sanitizer.sanitize(output_path, self.mode)
-            self.after(0, lambda: self._show_results(report, scan_only=False))
-        except Exception as e:
-            self.after(0, lambda: self._log(f"ERROR: {e}"))
-        finally:
-            self.after(0, lambda: self._set_buttons_state(True))
+                # Generate output path
+                base, ext = os.path.splitext(file_path)
+                output_path = f"{base}_sanitized{ext}"
 
-    def _create_sanitizer(self):
-        ext = os.path.splitext(self.selected_file)[1].lower()
+                report = sanitizer.sanitize(output_path, self.mode)
+                if report.success:
+                    success_count += 1
+                self.after(0, lambda r=report: self._show_results(r, scan_only=False))
+            except Exception as e:
+                self.after(0, lambda m=file_path, err=e: self._log(f"ERROR on {os.path.basename(m)}: {err}"))
+
+        self.after(0, lambda: self._log("\n" + "=" * 50))
+        self.after(0, lambda: self._log(f"Batch Sanitization Completed. Success: {success_count}/{total}"))
+        self.after(0, lambda: self._log("=" * 50))
+        self.after(0, lambda: self._set_buttons_state(True))
+
+    def _create_sanitizer_for_file(self, file_path: str):
+        ext = os.path.splitext(file_path)[1].lower()
         log_cb = lambda msg: self.after(0, lambda m=msg: self._log(m))
 
         if ext == '.epub':
-            return EPUBSanitizer(self.selected_file, log_callback=log_cb)
+            return EPUBSanitizer(file_path, log_callback=log_cb)
         elif ext == '.pdf':
-            return PDFSanitizer(self.selected_file, log_callback=log_cb)
+            return PDFSanitizer(file_path, log_callback=log_cb)
         else:
-            self.after(0, lambda: messagebox.showwarning(
-                self.i18n.t("dialog.error"),
-                self.i18n.t("dialog.unsupported")
-            ))
-            self.after(0, lambda: self._set_buttons_state(True))
+            self.after(0, lambda f=file_path: self._log(f"Skipped: Unsupported format for {os.path.basename(f)}"))
             return None
 
     def _validate_file(self) -> bool:
-        if not self.selected_file or not os.path.isfile(self.selected_file):
+        if not self.selected_files:
             messagebox.showwarning(
                 self.i18n.t("dialog.error"),
                 self.i18n.t("dialog.no_file")
@@ -449,8 +520,6 @@ class App(ctk.CTk):
         for lbl, key in self.mode_desc_labels:
             lbl.configure(text=self.i18n.t(key))
 
-        # Update file label if a file is selected
-        if self.selected_file:
-            self.file_label.configure(
-                text=f"📄 {self.i18n.t('file.selected')}: {os.path.basename(self.selected_file)}"
-            )
+        # Update file label if files are selected
+        if self.selected_files:
+            self._update_file_labels()

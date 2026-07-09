@@ -37,6 +37,15 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "en": "Selected",
         "zh": "已選擇",
     },
+    "file.selected_count": {
+        "en": "Selected: {} files",
+        "zh": "已選擇: {} 個檔案",
+    },
+    "file.batch_mode": {
+        "en": "Selected {} files (Batch Mode)",
+        "zh": "已選擇 {} 個檔案 (批次模式)",
+    },
+
 
     # ── Mode Selection ──
     "mode.title": {
