@@ -22,7 +22,6 @@ if __name__ == "__main__" and __package__ is None:
 
 import os
 import threading
-import subprocess
 import platform
 from tkinter import filedialog, messagebox
 import customtkinter as ctk
