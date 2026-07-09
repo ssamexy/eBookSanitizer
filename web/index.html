@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>eBookSanitizer - Scan & Sanitize eBooks</title>
+  <!-- Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500&family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;600;700;800&display=swap" rel="stylesheet">
+  <!-- Stylesheet -->
+  <link rel="stylesheet" href="style.css">
+  
+  <!-- CDNs for required libraries -->
+  <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
+</head>
+<body>
+  <div class="app-container">
+    <!-- Header Section -->
+    <header class="app-header">
+      <div class="header-left">
+        <h1 class="app-title"><span class="shield-icon">🛡️</span> eBookSanitizer</h1>
+        <p class="app-subtitle" data-i18n="app.subtitle">Scan & sanitize eBooks for malicious content</p>
+      </div>
+      <div class="header-right">
+        <!-- Language Switcher -->
+        <button id="lang-btn" class="btn btn-secondary text-sm">中文</button>
+        <!-- Theme Toggle -->
+        <button id="theme-btn" class="btn btn-icon" aria-label="Toggle Theme">🌙</button>
+        <!-- YARA Info (Web version limit reminder) -->
+        <div class="yara-status">
+          <span class="dot"></span>
+          <span class="yara-text" data-i18n="yara.unavailable">YARA signature scan unavailable (Desktop only)</span>
+        </div>
+      </div>
+    </header>
+
+    <!-- Main Workspace -->
+    <main class="app-workspace">
+      <!-- Left Panel: Configuration & Files Drop -->
+      <section class="panel panel-left">
+        <!-- Drag & Drop Area -->
+        <div id="drop-zone" class="drop-zone">
+          <input type="file" id="file-input" multiple accept=".epub,.pdf" class="hidden-file-input">
+          <div class="drop-zone-content">
+            <span class="drop-icon">📂</span>
+            <h3 data-i18n="file.drop_title">Drag & drop files here</h3>
+            <p data-i18n="file.drop_subtitle">or click to browse from folder (supports .epub, .pdf)</p>
+          </div>
+        </div>
+
+        <!-- Sanitization Mode Selector -->
+        <div class="card mode-card">
+          <h2 class="card-title" data-i18n="mode.title">Sanitization Level</h2>
+          <div class="mode-options">
+            <!-- Standard Mode -->
+            <label class="mode-option" for="mode-standard">
+              <input type="radio" name="sanitize-mode" id="mode-standard" value="standard" checked>
+              <div class="mode-option-content">
+                <div class="mode-header">
+                  <span class="badge badge-success" data-i18n="mode.standard.badge">Standard</span>
+                </div>
+                <p class="mode-desc" data-i18n="mode.standard.desc">Remove known threats like scripts, event handlers, and dangerous PDF actions. Keep normal links and attachments.</p>
+              </div>
+            </label>
+
+            <!-- Strict Mode -->
+            <label class="mode-option" for="mode-strict">
+              <input type="radio" name="sanitize-mode" id="mode-strict" value="strict">
+              <div class="mode-option-content">
+                <div class="mode-header">
+                  <span class="badge badge-warning" data-i18n="mode.strict.badge">Strict</span>
+                </div>
+                <p class="mode-desc" data-i18n="mode.strict.desc">Standard security + neutralize external links, tracking pixels, and block embedded files/forms to prevent data exfiltration.</p>
+              </div>
+            </label>
+
+            <!-- Paranoid Mode -->
+            <label class="mode-option" for="mode-paranoid">
+              <input type="radio" name="sanitize-mode" id="mode-paranoid" value="paranoid">
+              <div class="mode-option-content">
+                <div class="mode-header">
+                  <span class="badge badge-danger" data-i18n="mode.paranoid.badge">Paranoid</span>
+                </div>
+                <p class="mode-desc" data-i18n="mode.paranoid.desc">Strict security + strip styles importing external resources. Rebuild file structures keeping only safe contents.</p>
+              </div>
+            </label>
+          </div>
+          <div class="scrub-option-wrapper" style="margin-top: 15px; display: flex; align-items: center; gap: 8px;">
+            <input type="checkbox" id="scrub-metadata" style="width: 16px; height: 16px; accent-color: var(--primary);">
+            <label for="scrub-metadata" style="font-size: 14px; font-weight: 500; cursor: pointer; color: var(--text-primary); user-select: none;" data-i18n="option.scrub_metadata">🧼 Scrub Metadata (Anonymize Author, Dates, and IDs)</label>
+          </div>
+        </div>
+      </section>
+
+      <!-- Right Panel: Queue, Threat Stats & Real-time Logs -->
+      <section class="panel panel-right">
+        <!-- File Queue Card -->
+        <div class="card queue-card">
+          <div class="card-header-row">
+            <h2 class="card-title" data-i18n="queue.title">File Queue</h2>
+            <button id="clear-queue-btn" class="btn btn-text text-sm hidden" data-i18n="queue.clear">Clear All</button>
+          </div>
+          <div id="queue-list" class="queue-list empty">
+            <div class="empty-state" data-i18n="queue.empty">No files loaded yet. Drop files on the left panel to begin.</div>
+          </div>
+        </div>
+
+        <!-- Metrics Dashboard -->
+        <div class="metrics-grid">
+          <div class="metric-card high">
+            <div class="metric-num" id="metric-high">0</div>
+            <div class="metric-label" data-i18n="threat.severity.high">High Threat</div>
+          </div>
+          <div class="metric-card medium">
+            <div class="metric-num" id="metric-medium">0</div>
+            <div class="metric-label" data-i18n="threat.severity.medium">Medium Threat</div>
+          </div>
+          <div class="metric-card low">
+            <div class="metric-num" id="metric-low">0</div>
+            <div class="metric-label" data-i18n="threat.severity.low">Low Threat</div>
+          </div>
+        </div>
+
+        <!-- Terminal Logs Panel -->
+        <div class="card log-card">
+          <div class="card-header-row">
+            <h2 class="card-title" data-i18n="log.title">Activity Logs</h2>
+            <div class="log-actions">
+              <button id="clear-logs-btn" class="btn btn-text text-sm" data-i18n="log.clear">Clear Logs</button>
+              <label class="autoscroll-toggle">
+                <input type="checkbox" id="autoscroll-chk" checked>
+                <span data-i18n="log.autoscroll">Auto-scroll</span>
+              </label>
+            </div>
+          </div>
+          <div id="log-terminal" class="log-terminal">
+            <div class="log-line system-line" data-i18n="log.ready">System ready. Waiting for files to sanitize...</div>
+          </div>
+        </div>
+
+        <!-- Action Bar -->
+        <div class="action-bar">
+          <button id="action-btn" class="btn btn-primary btn-large disabled" disabled data-i18n="btn.sanitize_all">
+            🛡️ Sanitize All Files
+          </button>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <!-- Scripts -->
+  <script src="epub-sanitizer.js"></script>
+  <script src="pdf-sanitizer.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

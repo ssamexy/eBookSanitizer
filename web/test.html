@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>eBookSanitizer JS Unit Tests</title>
+  <!-- Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500&family=Inter:wght@400;500;600;700&family=Outfit:wght@600;700;800&display=swap" rel="stylesheet">
+  <!-- CSS Styles -->
+  <link rel="stylesheet" href="style.css">
+  <style>
+    .test-suite-container {
+      max-width: 960px;
+      margin: 2rem auto;
+      padding: 2rem;
+      background: var(--panel-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 16px;
+      backdrop-filter: blur(12px);
+      box-shadow: var(--shadow-xl);
+    }
+    .test-header {
+      border-bottom: 1px solid var(--card-border);
+      padding-bottom: 1rem;
+      margin-bottom: 1.5rem;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .test-title {
+      font-family: var(--font-title);
+      font-size: 1.8rem;
+      font-weight: 800;
+    }
+    .test-summary-badge {
+      padding: 0.5rem 1rem;
+      border-radius: 8px;
+      font-weight: 700;
+      font-size: 0.9rem;
+    }
+    .test-summary-badge.all-pass {
+      background: var(--success-bg);
+      color: var(--success);
+      border: 1px solid var(--success-border);
+    }
+    .test-summary-badge.has-fail {
+      background: var(--danger-bg);
+      color: var(--danger);
+      border: 1px solid var(--danger-border);
+    }
+    .test-list {
+      display: flex;
+      flex-direction: column;
+      gap: 0.75rem;
+    }
+    .test-item {
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+      padding: 1rem;
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 10px;
+      transition: all 0.2s ease;
+    }
+    .test-item:hover {
+      border-color: var(--card-border-hover);
+    }
+    .test-item-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .test-name {
+      font-weight: 600;
+      font-size: 0.95rem;
+    }
+    .test-status {
+      font-size: 0.75rem;
+      font-weight: 700;
+      padding: 0.25rem 0.5rem;
+      border-radius: 4px;
+    }
+    .test-status.pass {
+      background: var(--success-bg);
+      color: var(--success);
+      border: 1px solid var(--success-border);
+    }
+    .test-status.fail {
+      background: var(--danger-bg);
+      color: var(--danger);
+      border: 1px solid var(--danger-border);
+    }
+    .test-error {
+      font-family: var(--font-mono);
+      font-size: 0.8rem;
+      color: var(--danger);
+      background: rgba(0, 0, 0, 0.2);
+      padding: 0.5rem;
+      border-radius: 4px;
+      white-space: pre-wrap;
+      word-break: break-all;
+    }
+    .test-logs {
+      font-family: var(--font-mono);
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      max-height: 120px;
+      overflow-y: auto;
+      background: rgba(0,0,0,0.15);
+      padding: 0.5rem;
+      border-radius: 4px;
+    }
+    .back-btn-row {
+      margin-top: 1.5rem;
+      display: flex;
+      justify-content: space-between;
+    }
+  </style>
+  
+  <!-- CDNs for required libraries -->
+  <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
+</head>
+<body>
+  <div class="test-suite-container">
+    <div class="test-header">
+      <div>
+        <h1 class="test-title">🧪 eBookSanitizer Test Suite</h1>
+        <p class="app-subtitle">Browser-side JavaScript Unit Tests</p>
+      </div>
+      <div id="summary-badge" class="test-summary-badge">Running tests...</div>
+    </div>
+
+    <div id="test-list" class="test-list">
+      <!-- Test items injected by JS -->
+    </div>
+
+    <div class="back-btn-row">
+      <a href="index.html" class="btn btn-secondary text-sm">⬅️ Back to Application</a>
+      <button id="run-btn" class="btn btn-primary text-sm">🔄 Re-run Tests</button>
+    </div>
+  </div>
+
+  <!-- Scripts -->
+  <script src="epub-sanitizer.js"></script>
+  <script src="pdf-sanitizer.js"></script>
+  <script src="test.js"></script>
+</body>
+</html>

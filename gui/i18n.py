@@ -52,6 +52,10 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "en": "Sanitization Mode",
         "zh": "消毒模式",
     },
+    "option.scrub_metadata": {
+        "en": "🧼 Scrub Metadata (Anonymize Author, Dates, and IDs)",
+        "zh": "🧼 抹除元數據 (匿名化作者、日期與識別碼)",
+    },
     "mode.standard": {
         "en": "🟢 Standard",
         "zh": "🟢 標準",
@@ -135,6 +139,14 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
     "result.open_folder": {
         "en": "Open Folder",
         "zh": "開啟資料夾",
+    },
+    "result.sha256": {
+        "en": "SHA-256",
+        "zh": "SHA-256",
+    },
+    "action.virustotal": {
+        "en": "VirusTotal Lookup",
+        "zh": "VirusTotal 查詢",
     },
 
     # ── Log Panel ──

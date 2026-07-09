@@ -42,6 +42,7 @@ class App(ctk.CTk):
         self.selected_files: list[str] = []
         self.mode = SanitizeMode.STANDARD
         self.yara_scanner = YaraScanner()
+        self.last_sha256: Optional[str] = None
 
         # ── Window Setup ──
         self.title(f"eBookSanitizer v{__version__}")
@@ -201,6 +202,17 @@ class App(ctk.CTk):
             desc.grid(row=1, column=0, sticky="w", padx=12, pady=(0, 10))
             self.mode_desc_labels.append((desc, desc_key))
 
+        # Metadata scrubbing checkbox
+        self.scrub_var = ctk.BooleanVar(value=False)
+        self.scrub_cb = ctk.CTkCheckBox(
+            mode_frame, text=self.i18n.t("option.scrub_metadata"),
+            variable=self.scrub_var,
+            font=ctk.CTkFont(size=Fonts.SIZE_BODY, weight="bold"),
+            fg_color=Colors.PRIMARY,
+            hover_color=Colors.PRIMARY_HOVER,
+        )
+        self.scrub_cb.grid(row=1, column=0, columnspan=3, sticky="w", padx=4, pady=(12, 4))
+
     # ── Action Buttons ────────────────────────────────────────────────
 
     def _build_action_buttons(self):
@@ -249,6 +261,16 @@ class App(ctk.CTk):
         )
         self.log_title.grid(row=0, column=0, sticky="w")
 
+        self.vt_btn = ctk.CTkButton(
+            log_header, text=self.i18n.t("action.virustotal"), width=120, height=24,
+            font=ctk.CTkFont(size=Fonts.SIZE_SMALL),
+            fg_color=Colors.DARK_BG_TERTIARY,
+            hover_color=Colors.PRIMARY,
+            state="disabled",
+            command=self._open_virustotal,
+        )
+        self.vt_btn.grid(row=0, column=1, sticky="e", padx=(0, 8))
+
         self.clear_btn = ctk.CTkButton(
             log_header, text=self.i18n.t("log.clear"), width=60, height=24,
             font=ctk.CTkFont(size=Fonts.SIZE_SMALL),
@@ -256,7 +278,7 @@ class App(ctk.CTk):
             hover_color=Colors.DANGER,
             command=self._clear_log,
         )
-        self.clear_btn.grid(row=0, column=1, sticky="e")
+        self.clear_btn.grid(row=0, column=2, sticky="e")
 
         # Log textbox
         self.log_box = ctk.CTkTextbox(
@@ -287,6 +309,8 @@ class App(ctk.CTk):
             self._update_file_labels()
 
     def _update_file_labels(self):
+        self.last_sha256 = None
+        self.vt_btn.configure(state="disabled")
         count = len(self.selected_files)
         if count == 0:
             self.file_label.configure(text="")
@@ -402,7 +426,7 @@ class App(ctk.CTk):
                 base, ext = os.path.splitext(file_path)
                 output_path = f"{base}_sanitized{ext}"
 
-                report = sanitizer.sanitize(output_path, self.mode)
+                report = sanitizer.sanitize(output_path, self.mode, scrub_metadata=self.scrub_var.get())
                 if report.success:
                     success_count += 1
                 self.after(0, lambda r=report: self._show_results(r, scan_only=False))
@@ -441,6 +465,12 @@ class App(ctk.CTk):
 
     def _show_results(self, report, scan_only: bool):
         self._log("─" * 50)
+        if report.sha256:
+            self.last_sha256 = report.sha256
+            self.vt_btn.configure(state="normal")
+            self._log(f"🔑  {self.i18n.t('result.sha256')}: {report.sha256}")
+            self._log(f"🔍  {self.i18n.t('action.virustotal')}: https://www.virustotal.com/gui/file/{report.sha256}")
+            self._log("")
 
         if report.has_threats:
             summary = report.threat_summary()
@@ -482,6 +512,13 @@ class App(ctk.CTk):
         self.log_box.configure(state="normal")
         self.log_box.delete("1.0", "end")
         self.log_box.configure(state="disabled")
+        self.last_sha256 = None
+        self.vt_btn.configure(state="disabled")
+
+    def _open_virustotal(self):
+        if self.last_sha256:
+            import webbrowser
+            webbrowser.open(f"https://www.virustotal.com/gui/file/{self.last_sha256}")
 
     def _set_buttons_state(self, enabled: bool):
         state = "normal" if enabled else "disabled"
@@ -521,6 +558,7 @@ class App(ctk.CTk):
             btn.configure(text=self.i18n.t(key))
         for lbl, key in self.mode_desc_labels:
             lbl.configure(text=self.i18n.t(key))
+        self.scrub_cb.configure(text=self.i18n.t("option.scrub_metadata"))
 
         # Update file label if files are selected
         if self.selected_files:

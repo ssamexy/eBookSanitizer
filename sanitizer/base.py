@@ -31,6 +31,7 @@ class Threat:
 class SanitizeReport:
     def __init__(self, file_path: str):
         self.file_path = file_path
+        self.sha256 = ""
         self.has_threats = False
         self.threats: List[Threat] = []
         self.sanitized_path = ""
@@ -69,6 +70,7 @@ class SanitizeReport:
     def to_dict(self) -> Dict[str, Any]:
         return {
             "file_path": self.file_path,
+            "sha256": self.sha256,
             "has_threats": self.has_threats,
             "threat_summary": self.threat_summary(),
             "threats": [t.to_dict() for t in self.threats],
@@ -85,16 +87,29 @@ class BaseSanitizer:
         self.report = SanitizeReport(file_path)
         if log_callback:
             self.report.set_log_callback(log_callback)
+        self._calculate_sha256()
+
+    def _calculate_sha256(self):
+        import hashlib
+        sha256 = hashlib.sha256()
+        try:
+            with open(self.file_path, 'rb') as f:
+                while chunk := f.read(8192):
+                    sha256.update(chunk)
+            self.report.sha256 = sha256.hexdigest()
+        except Exception as e:
+            self.report.log(f"Warning: Could not calculate SHA-256: {e}")
 
     def scan(self) -> SanitizeReport:
         """Scan the file for threats and update the report. Do not modify the file."""
         raise NotImplementedError("Subclasses must implement scan()")
 
-    def sanitize(self, output_path: str, mode: SanitizeMode = SanitizeMode.STANDARD) -> SanitizeReport:
+    def sanitize(self, output_path: str, mode: SanitizeMode = SanitizeMode.STANDARD, scrub_metadata: bool = False) -> SanitizeReport:
         """Sanitize the file and save the result to output_path.
         
         Args:
             output_path: Path for the sanitized output file.
             mode: One of STANDARD, STRICT, or PARANOID.
+            scrub_metadata: If True, anonymizes metadata fields.
         """
         raise NotImplementedError("Subclasses must implement sanitize()")

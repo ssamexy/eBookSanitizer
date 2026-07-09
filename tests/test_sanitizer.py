@@ -28,6 +28,7 @@ from sanitizer.pdf_sanitizer import PDFSanitizer
 from sanitizer.yara_scanner import YaraScanner
 from gui.i18n import I18n
 from cli import cli_main, build_parser
+from pypdf import PdfReader, PdfWriter
 
 # ══════════════════════════════════════════════════════════════════════
 #  TEST INFRASTRUCTURE
@@ -881,6 +882,97 @@ def _check_real_book_test(file_path: str, is_epub: bool):
     return True
 
 
+@test("EPUB: Metadata Scrubbing removes author/dates and adds safe UUID")
+def test_epub_metadata_scrub():
+    p = _tmp_path('.epub')
+    out = _tmp_path('.epub')
+    try:
+        # Create a mock EPUB manifest with metadata
+        opf = b"""<?xml version="1.0" encoding="utf-8"?>
+<package xmlns="http://www.idpf.org/2007/opf" version="2.0">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+    <dc:title>Test Book</dc:title>
+    <dc:creator>John Doe</dc:creator>
+    <dc:date>2026-07-09</dc:date>
+    <dc:publisher>Test Publisher</dc:publisher>
+    <dc:identifier id="uid">original-uuid-12345</dc:identifier>
+  </metadata>
+  <manifest>
+    <item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml"/>
+  </manifest>
+  <spine toc="ncx"/>
+</package>"""
+        
+        with zipfile.ZipFile(p, 'w') as zf:
+            zf.writestr('mimetype', 'application/epub+zip')
+            zf.writestr('OEBPS/content.opf', opf)
+            zf.writestr('OEBPS/toc.ncx', b'<ncx></ncx>')
+            
+        # Sanitize with metadata scrubbing enabled
+        s = EPUBSanitizer(p)
+        r = s.sanitize(out, SanitizeMode.STANDARD, scrub_metadata=True)
+        assert r.success
+        assert r.sha256 != ""
+        
+        # Parse output OPF
+        with zipfile.ZipFile(out, 'r') as zf:
+            clean_opf = zf.read('OEBPS/content.opf')
+            
+        import xml.etree.ElementTree as ET
+        root = ET.fromstring(clean_opf)
+        metadata = root.find('.//{http://www.idpf.org/2007/opf}metadata')
+        if metadata is None:
+            metadata = root.find('.//metadata')
+            
+        assert metadata is not None
+        # Check that dc:creator, dc:date, dc:publisher are removed
+        for child in metadata:
+            tag_local = child.tag.split('}')[-1]
+            assert tag_local not in ('creator', 'date', 'publisher')
+            if tag_local == 'identifier':
+                assert child.text == 'urn:uuid:00000000-0000-0000-0000-000000000000'
+                
+    finally:
+        for f in (p, out):
+            if os.path.exists(f): os.unlink(f)
+
+@test("PDF: Metadata Scrubbing clears Info and strips Metadata catalog key")
+def test_pdf_metadata_scrub():
+    p = _tmp_path('.pdf')
+    out = _tmp_path('.pdf')
+    try:
+        # Create a mock PDF with info metadata
+        writer = PdfWriter()
+        writer.add_blank_page(width=100, height=100)
+        writer.add_metadata({
+            "/Author": "Jane Doe",
+            "/Title": "Test Title",
+            "/Creator": "Test Creator"
+        })
+        with open(p, 'wb') as f:
+            writer.write(f)
+            
+        # Sanitize with metadata scrubbing enabled
+        s = PDFSanitizer(p)
+        r = s.sanitize(out, SanitizeMode.STANDARD, scrub_metadata=True)
+        assert r.success
+        assert r.sha256 != ""
+        
+        # Verify output info is empty and Metadata catalog key is gone
+        reader = PdfReader(out)
+        info = reader.metadata
+        if info:
+            for k in info.keys():
+                assert k not in ('/Author', '/Creator', '/Title')
+        
+        # Verify root catalog has no /Metadata stream
+        root = reader.root_object
+        assert "/Metadata" not in root
+    finally:
+        for f in (p, out):
+            if os.path.exists(f): os.unlink(f)
+
+
 @test("Real Book: Parenting EPUB")
 def test_real_book_parenting_epub():
     tests_dir = os.path.dirname(os.path.abspath(__file__))
@@ -942,6 +1034,7 @@ ALL_TESTS = [
     test_epub_multi_threat, test_epub_idempotent,
     test_epub_preserves_assets, test_epub_log_callback,
     test_pdf_log_callback,
+    test_epub_metadata_scrub, test_pdf_metadata_scrub,
     # Real books
     test_real_book_parenting_epub, test_real_book_thinking_fast_epub,
     test_real_book_thinking_fast_pdf,
@@ -961,8 +1054,8 @@ def main():
         "YARA Scanner": ALL_TESTS[36:39],
         "I18n (Bilingual)": ALL_TESTS[39:46],
         "CLI (Command Line Interface)": ALL_TESTS[46:57],
-        "Edge Cases & Integration": ALL_TESTS[57:62],
-        "Real Book Tests (./test data)": ALL_TESTS[62:],
+        "Edge Cases & Integration": ALL_TESTS[57:64],
+        "Real Book Tests (./test data)": ALL_TESTS[64:],
     }
 
     for title, tests in sections.items():

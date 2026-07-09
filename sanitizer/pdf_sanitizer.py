@@ -162,7 +162,7 @@ class PDFSanitizer(BaseSanitizer):
     #  SANITIZE (three-tier modes)
     # ══════════════════════════════════════════════════════════════════
 
-    def sanitize(self, output_path: str, mode: SanitizeMode = SanitizeMode.STANDARD) -> SanitizeReport:
+    def sanitize(self, output_path: str, mode: SanitizeMode = SanitizeMode.STANDARD, scrub_metadata: bool = False) -> SanitizeReport:
         self.report.log(f"Sanitizing PDF [{mode.value}]: {os.path.basename(self.file_path)}")
 
         try:
@@ -179,7 +179,14 @@ class PDFSanitizer(BaseSanitizer):
                 writer.add_page(page)
 
             # ── Clean document root ──
-            self._clean_root(reader, writer, mode)
+            self._clean_root(reader, writer, mode, scrub_metadata)
+
+            # ── Document Information (/Info) ──
+            if scrub_metadata:
+                writer._info.clear()
+                self.report.log("Trailer: Cleared Document Info dictionary (/Info) for metadata scrubbing.")
+            elif reader.metadata:
+                writer.add_metadata(reader.metadata)
 
             # ── Write output ──
             with open(output_path, "wb") as f:
@@ -283,7 +290,7 @@ class PDFSanitizer(BaseSanitizer):
     # ── Root (Catalog) cleaning ───────────────────────────────────────
 
     def _clean_root(self, reader: PdfReader, writer: PdfWriter,
-                    mode: SanitizeMode):
+                    mode: SanitizeMode, scrub_metadata: bool = False):
         """Clean the document catalog / root object."""
         root = writer._root_object
         orig_root = reader.root_object
@@ -293,6 +300,11 @@ class PDFSanitizer(BaseSanitizer):
 
             # Skip keys already managed by PdfWriter
             if k in root:
+                continue
+
+            # Skip metadata stream if scrubbing
+            if norm == "/Metadata" and scrub_metadata:
+                self.report.log("Root: Stripped /Metadata stream (Metadata Scrubbing)")
                 continue
 
             # STANDARD: strip high-severity root keys

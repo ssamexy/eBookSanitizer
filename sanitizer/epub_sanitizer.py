@@ -191,7 +191,7 @@ class EPUBSanitizer(BaseSanitizer):
     #  SANITIZE (three-tier modes)
     # ══════════════════════════════════════════════════════════════════
 
-    def sanitize(self, output_path: str, mode: SanitizeMode = SanitizeMode.STANDARD) -> SanitizeReport:
+    def sanitize(self, output_path: str, mode: SanitizeMode = SanitizeMode.STANDARD, scrub_metadata: bool = False) -> SanitizeReport:
         self.report.log(f"Sanitizing EPUB [{mode.value}]: {os.path.basename(self.file_path)}")
 
         if not zipfile.is_zipfile(self.file_path):
@@ -231,6 +231,10 @@ class EPUBSanitizer(BaseSanitizer):
                     if ext in {'.xhtml', '.html', '.htm', '.xml', '.svg'}:
                         file_data = self._sanitize_html(name, file_data, mode)
 
+                    # Scrub metadata from OPF manifest file
+                    if ext == '.opf' and scrub_metadata:
+                        file_data = self._scrub_opf_metadata(file_data)
+
                     with open(target_path, 'wb') as f:
                         f.write(file_data)
 
@@ -248,6 +252,52 @@ class EPUBSanitizer(BaseSanitizer):
             shutil.rmtree(temp_dir, ignore_errors=True)
 
         return self.report
+
+    def _scrub_opf_metadata(self, file_data: bytes) -> bytes:
+        import xml.etree.ElementTree as ET
+        try:
+            # Register namespaces to keep output formatted correctly
+            namespaces = {
+                '': 'http://www.idpf.org/2007/opf',
+                'dc': 'http://purl.org/dc/elements/1.1/',
+                'opf': 'http://www.idpf.org/2007/opf',
+                'xsi': 'http://www.w3.org/2001/XMLSchema-instance',
+                'dcterms': 'http://purl.org/dc/terms/'
+            }
+            for prefix, uri in namespaces.items():
+                ET.register_namespace(prefix, uri)
+
+            root = ET.fromstring(file_data)
+            metadata = root.find('.//{http://www.idpf.org/2007/opf}metadata')
+            if metadata is None:
+                metadata = root.find('.//metadata')
+
+            if metadata is not None:
+                to_remove = []
+                for elem in metadata:
+                    tag_local = elem.tag.split('}')[-1]
+                    if tag_local in ('creator', 'contributor', 'date', 'publisher', 'rights', 'identifier'):
+                        to_remove.append(elem)
+                    elif tag_local == 'meta' and 'refines' not in elem.attrib:
+                        prop = elem.get('property', '')
+                        name_attr = elem.get('name', '')
+                        if 'modified' in prop or 'date' in prop or name_attr in ('calibre:title_sort', 'calibre:timestamp', 'calibre:series'):
+                            to_remove.append(elem)
+
+                for elem in to_remove:
+                    metadata.remove(elem)
+
+                # Re-insert safe dc:identifier (pub-id)
+                id_elem = ET.Element('{http://purl.org/dc/elements/1.1/}identifier', id='pub-id')
+                id_elem.text = 'urn:uuid:00000000-0000-0000-0000-000000000000'
+                metadata.append(id_elem)
+
+                self.report.log("EPUB: Anonymized metadata inside OPF manifest.")
+
+            return ET.tostring(root, encoding='utf-8')
+        except Exception as e:
+            self.report.log(f"Warning: Failed to scrub OPF metadata: {e}")
+            return file_data
 
     def _sanitize_html(self, file_in_epub: str, content: bytes, mode: SanitizeMode) -> bytes:
         """Clean HTML content according to the selected sanitization mode."""
