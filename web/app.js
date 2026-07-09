@@ -73,7 +73,14 @@ const TRANSLATIONS = {
 };
 
 // ── Application State ──────────────────────────────────────────────
-let currentLang = localStorage.getItem("ebs_lang") || "zh-TW";
+// Auto-detect browser language on first visit; respect saved preference on return visits.
+function detectLang() {
+  const saved = localStorage.getItem("ebs_lang");
+  if (saved) return saved;
+  const browserLang = (navigator.language || navigator.userLanguage || "en").toLowerCase();
+  return browserLang.startsWith("zh") ? "zh-TW" : "en";
+}
+let currentLang = detectLang();
 let fileQueue = [];
 let isProcessing = false;
 
@@ -133,8 +140,11 @@ function updateTranslations() {
 
   // Toggle button label
   langBtn.textContent = currentLang === "zh-TW" ? "English" : "中文";
-  
-  // Save preferences
+
+  // Sync <html lang> for accessibility / SEO
+  document.documentElement.setAttribute("lang", currentLang === "zh-TW" ? "zh-TW" : "en");
+
+  // Save preference for return visits
   localStorage.setItem("ebs_lang", currentLang);
 
   // Re-render file queue to reflect language change on statuses
