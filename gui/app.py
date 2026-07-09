@@ -93,9 +93,12 @@ class App(ctk.CTk):
         )
         self.subtitle_label.grid(row=1, column=0, sticky="w")
 
-        # Right side: Language + Theme toggles
-        toggle_frame = ctk.CTkFrame(header, fg_color="transparent")
-        toggle_frame.grid(row=0, column=2, rowspan=2, sticky="e")
+        # Right side: Language + Theme toggles (wrapped in right_panel to avoid grid overlap)
+        right_panel = ctk.CTkFrame(header, fg_color="transparent")
+        right_panel.grid(row=0, column=2, rowspan=2, sticky="ne")
+
+        toggle_frame = ctk.CTkFrame(right_panel, fg_color="transparent")
+        toggle_frame.pack(side="top", anchor="e", pady=(0, 2))
 
         self.lang_button = ctk.CTkButton(
             toggle_frame, text="中文", width=60, height=28,
@@ -119,11 +122,11 @@ class App(ctk.CTk):
         yara_text = self.i18n.t("yara.available" if self.yara_scanner.available else "yara.unavailable")
         yara_color = Colors.SUCCESS if self.yara_scanner.available else Colors.DARK_TEXT_SECONDARY
         self.yara_label = ctk.CTkLabel(
-            header, text=yara_text,
+            right_panel, text=yara_text,
             font=ctk.CTkFont(size=Fonts.SIZE_SMALL - 1),
             text_color=yara_color,
         )
-        self.yara_label.grid(row=1, column=2, sticky="e")
+        self.yara_label.pack(side="top", anchor="e", pady=(2, 0))
 
     # ── File Selection ────────────────────────────────────────────────
 
