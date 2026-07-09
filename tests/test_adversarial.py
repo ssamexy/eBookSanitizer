@@ -28,7 +28,7 @@ import threading
 import time
 from contextlib import redirect_stdout, redirect_stderr
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from sanitizer.base import Threat, SanitizeReport, SanitizeMode, BaseSanitizer
 from sanitizer.epub_sanitizer import EPUBSanitizer

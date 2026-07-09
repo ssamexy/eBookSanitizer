@@ -20,7 +20,7 @@ import shutil
 import io
 from contextlib import redirect_stdout
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from sanitizer.base import Threat, SanitizeReport, SanitizeMode, BaseSanitizer
 from sanitizer.epub_sanitizer import EPUBSanitizer
@@ -883,19 +883,22 @@ def _check_real_book_test(file_path: str, is_epub: bool):
 
 @test("Real Book: Parenting EPUB")
 def test_real_book_parenting_epub():
-    path = os.path.join("test data", "The Five Principles of Parenting Your Essential Guide to Raising Good Humans (Aliza Pressman).epub")
+    tests_dir = os.path.dirname(os.path.abspath(__file__))
+    path = os.path.join(tests_dir, "test_data", "The Five Principles of Parenting Your Essential Guide to Raising Good Humans (Aliza Pressman).epub")
     assert _check_real_book_test(path, is_epub=True)
 
 
 @test("Real Book: Thinking Fast EPUB")
 def test_real_book_thinking_fast_epub():
-    path = os.path.join("test data", "Thinking, Fast and Slow (Daniel Kahneman) (z-library.sk, 1lib.sk, z-lib.sk).epub")
+    tests_dir = os.path.dirname(os.path.abspath(__file__))
+    path = os.path.join(tests_dir, "test_data", "Thinking, Fast and Slow (Daniel Kahneman) (z-library.sk, 1lib.sk, z-lib.sk).epub")
     assert _check_real_book_test(path, is_epub=True)
 
 
 @test("Real Book: Thinking Fast PDF")
 def test_real_book_thinking_fast_pdf():
-    path = os.path.join("test data", "Thinking, Fast and Slow (Daniel Kahneman) (z-library.sk, 1lib.sk, z-lib.sk).pdf")
+    tests_dir = os.path.dirname(os.path.abspath(__file__))
+    path = os.path.join(tests_dir, "test_data", "Thinking, Fast and Slow (Daniel Kahneman) (z-library.sk, 1lib.sk, z-lib.sk).pdf")
     assert _check_real_book_test(path, is_epub=False)
 
 
